@@ -15,15 +15,7 @@ one from your own follow graph data.
 
 ## Install
 
-### From source
-
-```bash
-git clone https://github.com/walterra/x2masto.git
-cd x2masto
-npm ci
-```
-
-### As an npm package (once published)
+### As an npm package
 
 ```bash
 npm install -g x2masto

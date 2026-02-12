@@ -5,6 +5,8 @@ Thanks for your interest in improving `x2masto`.
 ## Development setup
 
 ```bash
+git clone https://github.com/walterra/x2masto.git
+cd x2masto
 npm ci
 ```
 
