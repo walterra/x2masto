@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+
+# Generated datasets / local artifacts
+data/*.csv
+data/*.jsonl
+!data/test-following.csv
+!data/test-following.jsonl
+
+# Local dev/test artifacts
+coverage/
+.tmp/

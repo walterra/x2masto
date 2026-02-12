@@ -1,0 +1,47 @@
+{
+  "name": "x2masto",
+  "version": "0.1.0",
+  "description": "Collect X following data and generate Mastodon import candidates",
+  "type": "module",
+  "license": "MIT",
+  "author": "Walter M. Rafelsberger",
+  "homepage": "https://github.com/walterra/x2masto#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/walterra/x2masto.git"
+  },
+  "bugs": {
+    "url": "https://github.com/walterra/x2masto/issues"
+  },
+  "keywords": [
+    "mastodon",
+    "twitter",
+    "x",
+    "fediverse",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "x2masto-collect": "scripts/collect_x_following.mjs",
+    "x2masto-match": "scripts/match_mastodon_from_x_raw.mjs",
+    "x2masto-search": "scripts/search_mastodon_from_x_profiles.mjs"
+  },
+  "files": [
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "collect:x-following": "node scripts/collect_x_following.mjs",
+    "match:mastodon": "node scripts/match_mastodon_from_x_raw.mjs",
+    "search:mastodon": "node scripts/search_mastodon_from_x_profiles.mjs",
+    "smoke": "node scripts/collect_x_following.mjs --help && node scripts/match_mastodon_from_x_raw.mjs --help && node scripts/search_mastodon_from_x_profiles.mjs --help",
+    "test": "node --test",
+    "check": "npm run smoke && npm run test"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.4.0"
+  }
+}
