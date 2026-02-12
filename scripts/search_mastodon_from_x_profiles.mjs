@@ -28,7 +28,7 @@ function usage() {
   return `
 search_mastodon_from_x_profiles.mjs
 
-Search Mastodon accounts using scraped X profile data (handle/name), verify
+Search Mastodon accounts using collected X profile data (handle/name), verify
 via WebFinger, and output an additional import CSV.
 
 Usage:

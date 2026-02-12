@@ -4,7 +4,7 @@ Collect your X/Twitter following data and build Mastodon import CSVs.
 
 `x2masto` is a Node.js CLI toolkit that helps you:
 
-1. get your following list from X (via an existing Chrome session),
+1. browse your following list on X while a helper script reads visible profile cards,
 2. extract likely Mastodon handles from profile text/links,
 3. optionally run a second Mastodon search pass to discover more matches.
 
@@ -12,6 +12,13 @@ Collect your X/Twitter following data and build Mastodon import CSVs.
 
 X and Mastodon don't offer a direct follow migration path. This toolchain builds
 one from your own follow graph data.
+
+## How it works
+
+The collect step does **not** automate scrolling or navigation. You browse your
+own following list manually in Chrome while the script passively reads whatever
+profile cards are currently visible on screen — like a clipboard that remembers
+what you've seen. You control the pace; the script just takes notes.
 
 ## Install
 
@@ -40,6 +47,10 @@ Log into `x.com` in that Chrome window.
 ```bash
 npm run collect:x-following -- --user <username>
 ```
+
+The script opens your `/following` page and waits. **Scroll through the list
+yourself** at whatever pace you like. The script reads visible profile cards as
+you go. Press **Enter** in the terminal when you're done.
 
 Output files:
 
@@ -107,5 +118,5 @@ npm pack --dry-run
 ## Notes
 
 - X UI and anti-bot behavior can change; selectors may need updates.
-- Login/CAPTCHA/MFA are intentionally manual; extraction is scripted.
+- Login/CAPTCHA/MFA are intentionally manual; the collect step only reads visible data.
 - Handle extraction is heuristic. Review generated CSVs before importing.

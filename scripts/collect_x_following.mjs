@@ -2,6 +2,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import readline from "node:readline";
 import puppeteer from "puppeteer-core";
 
 function parseArgs(argv) {
@@ -31,8 +32,9 @@ function usage() {
   return `
 collect_x_following.mjs
 
-Scrape visible + scrolled accounts from an X /following page using an already
-running Chrome with remote debugging enabled.
+Collect visible accounts from an X /following page while you browse manually.
+The script connects to a running Chrome instance and passively reads profile
+cards as you scroll through your following list.
 
 Usage:
   node scripts/collect_x_following.mjs --user walterra
@@ -43,17 +45,23 @@ Options:
   --browser-url <url>          Chrome debug URL (default: http://127.0.0.1:9222)
   --csv <path>                 CSV output (default: data/x-following-raw.csv)
   --jsonl <path>               JSONL output (default: data/x-following-raw.jsonl)
-  --max-scrolls <n>            Max scroll steps (default: 400)
-  --idle-rounds <n>            Stop after n rounds without new users (default: 12)
-  --scroll-delay-ms <n>        Delay between scrolls (default: 1000)
+  --poll-interval-ms <n>       How often to read visible cards (default: 500)
   --max-users <n>              Optional hard cap on collected users
   --no-navigate                Use current tab URL, do not navigate
   --help                       Show this help
 
+How it works:
+  1. Start Chrome with remote debugging (see README).
+  2. Log into x.com in that Chrome window.
+  3. Run this script — it opens your /following page.
+  4. Scroll through the list at your own pace.
+  5. The script passively reads whatever profile cards are visible.
+  6. Press Enter when you're done. The script saves collected data.
+
 Example:
-  node scripts/collect_x_following.mjs \
-    --user walterra \
-    --csv data/x-following-raw.csv \
+  node scripts/collect_x_following.mjs \\
+    --user walterra \\
+    --csv data/x-following-raw.csv \\
     --jsonl data/x-following-raw.jsonl
 `;
 }
@@ -168,6 +176,158 @@ async function writeOutputs(users, csvPath, jsonlPath, runStartedAt) {
   await fs.writeFile(jsonlPath, jsonl ? `${jsonl}\n` : "", "utf-8");
 }
 
+function extractVisibleUsers() {
+  const noise = new Set([
+    "Follow",
+    "Following",
+    "Follows you",
+    "Subscribe",
+    "Subscribed",
+    "Pending",
+    "Blocked",
+    "Unblock",
+    "Accept",
+    "Requested",
+  ]);
+
+  const normalizeSpace = (s) => s.replace(/\s+/g, " ").trim();
+
+  return [...document.querySelectorAll('[data-testid="UserCell"]')].map((cell) => {
+    const lines = cell.innerText
+      .split("\n")
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+    const links = [...new Set([...cell.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')).filter(Boolean))];
+
+    const mention = lines.find((l) => /^@[A-Za-z0-9_]{1,15}$/.test(l)) || "";
+    const handleFromMention = mention ? mention.slice(1) : "";
+
+    const handlePath =
+      links.find((h) => /^\/[A-Za-z0-9_]{1,15}$/.test(h)) ||
+      "";
+
+    const avatarTestId =
+      cell.querySelector('[data-testid^="UserAvatar-Container-"]')?.getAttribute('data-testid') ||
+      "";
+    const handleFromTestId = avatarTestId.startsWith("UserAvatar-Container-")
+      ? avatarTestId.replace("UserAvatar-Container-", "")
+      : "";
+
+    const handle = handleFromMention || (handlePath ? handlePath.slice(1) : "") || handleFromTestId;
+
+    const displayName = lines[0] || "";
+
+    const bio = normalizeSpace(
+      lines
+        .filter((l) => !noise.has(l))
+        .filter((l) => l !== displayName)
+        .filter((l) => l !== mention)
+        .filter((l) => !/^@[A-Za-z0-9_]{1,15}$/.test(l))
+        .join(" "),
+    );
+
+    const profilePath = handle ? `/${handle}` : handlePath;
+    const profileUrl = profilePath ? `https://x.com${profilePath}` : "";
+
+    const externalLinks = links.filter((h) => /^https?:\/\//.test(h)).join(" | ");
+
+    return {
+      handle,
+      display_name: displayName,
+      bio,
+      profile_url: profileUrl,
+      external_links: externalLinks,
+      follows_you: lines.includes("Follows you"),
+      is_following: lines.includes("Following"),
+      raw_text: lines.join(" | "),
+      raw_links: links.join(" | "),
+    };
+  });
+}
+
+function injectOverlay() {
+  const existing = document.getElementById("x2masto-overlay");
+  if (existing) return;
+
+  const el = document.createElement("div");
+  el.id = "x2masto-overlay";
+  Object.assign(el.style, {
+    position: "fixed",
+    bottom: "20px",
+    right: "20px",
+    zIndex: "2147483647",
+    fontFamily: "system-ui, -apple-system, sans-serif",
+    fontSize: "13px",
+    fontWeight: "500",
+    lineHeight: "1",
+    padding: "10px 14px",
+    borderRadius: "10px",
+    color: "#fff",
+    background: "rgba(30, 30, 30, 0.92)",
+    backdropFilter: "blur(8px)",
+    WebkitBackdropFilter: "blur(8px)",
+    boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
+    transition: "background 0.2s ease, opacity 0.2s ease",
+    pointerEvents: "none",
+    userSelect: "none",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  });
+
+  const dot = document.createElement("span");
+  dot.id = "x2masto-dot";
+  Object.assign(dot.style, {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    background: "#facc15",
+    flexShrink: "0",
+    transition: "background 0.2s ease",
+  });
+
+  const label = document.createElement("span");
+  label.id = "x2masto-label";
+  label.textContent = "x2masto: connecting…";
+
+  el.appendChild(dot);
+  el.appendChild(label);
+  document.body.appendChild(el);
+}
+
+function updateOverlay(state, count) {
+  const dot = document.getElementById("x2masto-dot");
+  const label = document.getElementById("x2masto-label");
+  if (!dot || !label) return;
+
+  if (state === "reading") {
+    dot.style.background = "#facc15";
+    label.textContent = `reading… (${count} collected)`;
+  } else if (state === "ready") {
+    dot.style.background = "#4ade80";
+    label.textContent = `✓ scroll for more (${count} collected)`;
+  } else if (state === "done") {
+    dot.style.background = "#60a5fa";
+    label.textContent = `done — ${count} profiles saved`;
+  }
+}
+
+function removeOverlay() {
+  const el = document.getElementById("x2masto-overlay");
+  if (el) el.remove();
+}
+
+function waitForEnter() {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question("", () => {
+      rl.close();
+      resolve();
+    });
+  });
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -180,9 +340,7 @@ async function main() {
   const url = args.url || (user ? `https://x.com/${user}/following` : "");
   const csvPath = args.csv || "data/x-following-raw.csv";
   const jsonlPath = args.jsonl || "data/x-following-raw.jsonl";
-  const maxScrolls = toInt(args["max-scrolls"], 400);
-  const idleRoundsLimit = toInt(args["idle-rounds"], 12);
-  const scrollDelayMs = toInt(args["scroll-delay-ms"], 1000);
+  const pollIntervalMs = toInt(args["poll-interval-ms"], 500);
   const maxUsers = args["max-users"] ? toInt(args["max-users"], 0) : 0;
   const noNavigate = Boolean(args["no-navigate"]);
 
@@ -198,6 +356,8 @@ async function main() {
     defaultViewport: null,
   });
 
+  let stopRequested = false;
+
   try {
     const pages = await browser.pages();
     const page = pages.at(-1);
@@ -210,98 +370,42 @@ async function main() {
       console.log(`Using current tab: ${page.url()}`);
     }
 
-    console.log("Waiting for follow cards...");
+    console.log("Waiting for follow cards to appear...");
     await page.waitForSelector('[data-testid="UserCell"]', { timeout: 120_000 });
 
-    let idleRounds = 0;
-    let scrolls = 0;
+    // Inject the in-browser status overlay
+    await page.evaluate(injectOverlay);
 
-    while (scrolls < maxScrolls) {
+    console.log("");
+    console.log("╔══════════════════════════════════════════════════════════════╗");
+    console.log("║  Ready! Scroll through your following list in the browser.  ║");
+    console.log("║  This script passively reads visible profile cards.         ║");
+    console.log("║  A status badge in the browser shows when to scroll.        ║");
+    console.log("║                                                             ║");
+    console.log("║  Press Enter here when you're done.                         ║");
+    console.log("╚══════════════════════════════════════════════════════════════╝");
+    console.log("");
+
+    // Start the "wait for Enter" promise
+    const enterPromise = waitForEnter().then(() => {
+      stopRequested = true;
+    });
+
+    // Also stop on Ctrl+C gracefully
+    process.on("SIGINT", () => {
+      stopRequested = true;
+    });
+
+    // Polling loop — passively reads visible cards without scrolling
+    while (!stopRequested) {
       const now = new Date().toISOString();
       const before = seen.size;
 
-      const snapshot = await page.evaluate(() => {
-        const noise = new Set([
-          "Follow",
-          "Following",
-          "Follows you",
-          "Subscribe",
-          "Subscribed",
-          "Pending",
-          "Blocked",
-          "Unblock",
-          "Accept",
-          "Requested",
-        ]);
+      await page.evaluate(updateOverlay, "reading", seen.size);
 
-        const normalizeSpace = (s) => s.replace(/\s+/g, " ").trim();
+      const users = await page.evaluate(extractVisibleUsers);
 
-        const users = [...document.querySelectorAll('[data-testid="UserCell"]')].map((cell) => {
-          const lines = cell.innerText
-            .split("\n")
-            .map((x) => x.trim())
-            .filter(Boolean);
-
-          const links = [...new Set([...cell.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')).filter(Boolean))];
-
-          const mention = lines.find((l) => /^@[A-Za-z0-9_]{1,15}$/.test(l)) || "";
-          const handleFromMention = mention ? mention.slice(1) : "";
-
-          const handlePath =
-            links.find((h) => /^\/[A-Za-z0-9_]{1,15}$/.test(h)) ||
-            "";
-
-          const avatarTestId =
-            cell.querySelector('[data-testid^="UserAvatar-Container-"]')?.getAttribute('data-testid') ||
-            "";
-          const handleFromTestId = avatarTestId.startsWith("UserAvatar-Container-")
-            ? avatarTestId.replace("UserAvatar-Container-", "")
-            : "";
-
-          const handle = handleFromMention || (handlePath ? handlePath.slice(1) : "") || handleFromTestId;
-
-          const displayName = lines[0] || "";
-
-          const bio = normalizeSpace(
-            lines
-              .filter((l) => !noise.has(l))
-              .filter((l) => l !== displayName)
-              .filter((l) => l !== mention)
-              .filter((l) => !/^@[A-Za-z0-9_]{1,15}$/.test(l))
-              .join(" "),
-          );
-
-          const profilePath = handle ? `/${handle}` : handlePath;
-          const profileUrl = profilePath ? `https://x.com${profilePath}` : "";
-
-          const externalLinks = links.filter((h) => /^https?:\/\//.test(h)).join(" | ");
-
-          return {
-            handle,
-            display_name: displayName,
-            bio,
-            profile_url: profileUrl,
-            external_links: externalLinks,
-            follows_you: lines.includes("Follows you"),
-            is_following: lines.includes("Following"),
-            raw_text: lines.join(" | "),
-            raw_links: links.join(" | "),
-          };
-        });
-
-        const scroller = document.scrollingElement || document.documentElement;
-        const metrics = {
-          cell_count: users.length,
-          scroll_top: scroller.scrollTop,
-          scroll_height: scroller.scrollHeight,
-          client_height: scroller.clientHeight,
-          at_bottom: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4,
-        };
-
-        return { users, metrics };
-      });
-
-      for (const userRow of snapshot.users) {
+      for (const userRow of users) {
         const key = keyForUser(userRow);
         const merged = mergeUser(seen.get(key), userRow, now);
         seen.set(key, merged);
@@ -310,36 +414,29 @@ async function main() {
       const after = seen.size;
       const delta = after - before;
 
-      if (delta === 0) {
-        idleRounds += 1;
-      } else {
-        idleRounds = 0;
-      }
+      await page.evaluate(updateOverlay, "ready", after);
 
-      console.log(
-        `scroll=${scrolls} cards=${snapshot.metrics.cell_count} unique=${after} (+${delta}) idle=${idleRounds}/${idleRoundsLimit}`,
-      );
+      if (delta > 0) {
+        console.log(
+          `  collected: ${after} unique profiles (+${delta} new)`,
+        );
+      }
 
       if (maxUsers > 0 && after >= maxUsers) {
         console.log(`Reached --max-users=${maxUsers}, stopping.`);
         break;
       }
 
-      if (idleRounds >= idleRoundsLimit) {
-        console.log("No new users for too many rounds, stopping.");
-        break;
-      }
-
-      await page.evaluate(() => {
-        const amount = Math.floor(window.innerHeight * 0.92);
-        window.scrollBy(0, amount);
-      });
-
-      scrolls += 1;
-      await new Promise((r) => setTimeout(r, scrollDelayMs));
+      await Promise.race([
+        new Promise((r) => setTimeout(r, pollIntervalMs)),
+        enterPromise,
+      ]);
     }
 
     const users = [...seen.values()].filter((u) => u.handle || u.display_name || u.raw_text);
+
+    // Update overlay to "done" before writing files
+    await page.evaluate(updateOverlay, "done", users.length).catch(() => {});
     await writeOutputs(users, csvPath, jsonlPath, runStartedAt);
 
     console.log(`\nDone.`);
@@ -347,6 +444,14 @@ async function main() {
     console.log(`CSV:   ${csvPath}`);
     console.log(`JSONL: ${jsonlPath}`);
   } finally {
+    // Remove the overlay before disconnecting (best-effort)
+    try {
+      const pages = await browser.pages();
+      const page = pages.at(-1);
+      if (page) await page.evaluate(removeOverlay);
+    } catch {
+      // page may already be closed
+    }
     await browser.disconnect();
   }
 }
