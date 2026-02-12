@@ -88,5 +88,8 @@ jobs:
           node-version: "22"
           registry-url: https://registry.npmjs.org
 
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
+
       - name: Publish via trusted publishing
-        run: npm publish --provenance ./dist/*.tgz
+        run: npm publish --provenance --access public ./dist/*.tgz
