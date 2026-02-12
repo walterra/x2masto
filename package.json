@@ -1,6 +1,6 @@
 {
   "name": "x2masto",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Collect X following data and generate Mastodon import candidates",
   "type": "module",
   "license": "MIT",
