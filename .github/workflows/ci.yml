@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Test (node${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "22", "24"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run checks
+        run: npm run check
+
+  package:
+    name: Package checks
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pack (dry run)
+        run: npm pack --dry-run
+
+      - name: Build package tarball
+        run: npm pack --silent
+
+      - name: Smoke test package install
+        run: |
+          PKG_TGZ=$(ls -1 *.tgz | head -n 1)
+          mkdir -p /tmp/x2masto-smoke
+          cd /tmp/x2masto-smoke
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE/$PKG_TGZ"
+          npx x2masto-match --help >/dev/null
+          npx x2masto-search --help >/dev/null

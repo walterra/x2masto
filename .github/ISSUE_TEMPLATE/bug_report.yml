@@ -1,0 +1,44 @@
+name: Bug report
+description: Report incorrect behavior or crashes in x2masto
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened vs what you expected.
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command used
+      placeholder: npm run match:mastodon -- --input data/x-following-raw.jsonl
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      value: |
+        - OS:
+        - Node.js version:
+        - Install method (npm/npx/source):
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Paste relevant output. Remove personal data.
+      render: shell
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample input (sanitized)
+      description: Optional but very helpful for parser/matcher bugs.
